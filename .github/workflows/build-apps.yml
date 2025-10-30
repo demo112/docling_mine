@@ -25,12 +25,14 @@ jobs:
         python -m pip install --upgrade pip
         pip install pyinstaller
         pip install -e .
+        # 安装 UI 依赖
+        pip install -r requirements_ui.txt
     
     - name: Test docling CLI
       run: |
         docling --version
     
-    - name: Build macOS app with PyInstaller
+    - name: Build macOS CLI app with PyInstaller
       run: |
         pyinstaller --onefile \
           --name docling-macos \
@@ -42,16 +44,20 @@ jobs:
           --add-data "docling:docling" \
           docling/cli/main.py
     
-    - name: Create macOS app bundle
+    - name: Build macOS UI app with PyInstaller
       run: |
-        mkdir -p "Docling.app/Contents/MacOS"
-        mkdir -p "Docling.app/Contents/Resources"
+        pyinstaller docling_ui.spec
+    
+    - name: Create macOS CLI app bundle
+      run: |
+        mkdir -p "Docling-CLI.app/Contents/MacOS"
+        mkdir -p "Docling-CLI.app/Contents/Resources"
         
-        # Copy the executable
-        cp dist/docling-macos "Docling.app/Contents/MacOS/docling"
+        # Copy the CLI executable
+        cp dist/docling-macos "Docling-CLI.app/Contents/MacOS/docling"
         
-        # Create Info.plist
-        cat > "Docling.app/Contents/Info.plist" << EOF
+        # Create CLI Info.plist
+        cat > "Docling-CLI.app/Contents/Info.plist" << EOF
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
         <plist version="1.0">
@@ -59,9 +65,9 @@ jobs:
             <key>CFBundleExecutable</key>
             <string>docling</string>
             <key>CFBundleIdentifier</key>
-            <string>com.docling.app</string>
+            <string>com.docling.cli</string>
             <key>CFBundleName</key>
-            <string>Docling</string>
+            <string>Docling CLI</string>
             <key>CFBundleVersion</key>
             <string>2.58.0</string>
             <key>CFBundleShortVersionString</key>
@@ -78,35 +84,51 @@ jobs:
         </plist>
         EOF
         
-        # Make executable
-        chmod +x "Docling.app/Contents/MacOS/docling"
+        # Make CLI executable
+        chmod +x "Docling-CLI.app/Contents/MacOS/docling"
     
-    - name: Create DMG
+    - name: Create DMG packages
       run: |
         # Install create-dmg if not available
         if ! command -v create-dmg &> /dev/null; then
           brew install create-dmg
         fi
         
-        # Create DMG
+        # Create CLI DMG
         create-dmg \
-          --volname "Docling" \
+          --volname "Docling CLI" \
           --window-pos 200 120 \
           --window-size 600 300 \
           --icon-size 100 \
-          --icon "Docling.app" 175 120 \
-          --hide-extension "Docling.app" \
+          --icon "Docling-CLI.app" 175 120 \
+          --hide-extension "Docling-CLI.app" \
           --app-drop-link 425 120 \
-          "Docling-macOS.dmg" \
-          "Docling.app"
+          "Docling-CLI-macOS.dmg" \
+          "Docling-CLI.app"
+        
+        # Create UI DMG (UI app is already built by PyInstaller spec)
+        if [ -d "dist/Docling-UI.app" ]; then
+          create-dmg \
+            --volname "Docling UI" \
+            --window-pos 200 120 \
+            --window-size 600 300 \
+            --icon-size 100 \
+            --icon "dist/Docling-UI.app" 175 120 \
+            --hide-extension "dist/Docling-UI.app" \
+            --app-drop-link 425 120 \
+            "Docling-UI-macOS.dmg" \
+            "dist/Docling-UI.app"
+        fi
     
     - name: Upload macOS artifacts
       uses: actions/upload-artifact@v3
       with:
         name: docling-macos
         path: |
-          Docling-macOS.dmg
-          Docling.app
+          Docling-CLI-macOS.dmg
+          Docling-CLI.app
+          Docling-UI-macOS.dmg
+          dist/Docling-UI.app
 
   build-windows:
     runs-on: windows-latest
@@ -129,7 +151,7 @@ jobs:
       run: |
         docling --version
     
-    - name: Build Windows executable with PyInstaller
+    - name: Build Windows CLI executable with PyInstaller
       run: |
         pyinstaller --onefile `
           --name docling-windows `
@@ -141,35 +163,66 @@ jobs:
           --add-data "docling;docling" `
           docling/cli/main.py
     
+    - name: Build Windows UI executable with PyInstaller
+      run: |
+        # 创建 Windows 版本的 PyInstaller 配置
+        pyinstaller --onefile `
+          --name docling-ui-windows `
+          --console `
+          --collect-all streamlit `
+          --collect-all docling `
+          --collect-all docling_core `
+          --collect-all docling_parse `
+          --collect-all docling_ibm_models `
+          --collect-all pandas `
+          --collect-all PIL `
+          --add-data "docling_ui.py;." `
+          --add-data "requirements_ui.txt;." `
+          --hidden-import streamlit.web.cli `
+          --hidden-import streamlit.runtime.scriptrunner.script_runner `
+          run_ui.py
+    
     - name: Create Windows installer
       run: |
-        # Create a simple batch file wrapper
-        echo '@echo off' > docling.bat
-        echo 'docling-windows.exe %*' >> docling.bat
+        # Create batch file wrappers
+        echo '@echo off' > docling-cli.bat
+        echo 'docling-windows.exe %*' >> docling-cli.bat
+        
+        echo '@echo off' > docling-ui.bat
+        echo 'docling-ui-windows.exe' >> docling-ui.bat
         
         # Copy files to distribution folder
         mkdir dist-windows
         copy dist\docling-windows.exe dist-windows\
-        copy docling.bat dist-windows\
+        copy dist\docling-ui-windows.exe dist-windows\
+        copy docling-cli.bat dist-windows\
+        copy docling-ui.bat dist-windows\
         copy install-windows.ps1 dist-windows\
         
         # Create a comprehensive README
         echo "Docling for Windows" > dist-windows\README.txt
         echo "==================" >> dist-windows\README.txt
         echo "" >> dist-windows\README.txt
+        echo "包含两个应用程序:" >> dist-windows\README.txt
+        echo "1. Docling CLI - 命令行工具" >> dist-windows\README.txt
+        echo "2. Docling UI - 可视化界面" >> dist-windows\README.txt
+        echo "" >> dist-windows\README.txt
         echo "快速开始:" >> dist-windows\README.txt
         echo "1. 运行 install-windows.ps1 进行自动安装" >> dist-windows\README.txt
-        echo "2. 或者手动运行 docling-windows.exe" >> dist-windows\README.txt
+        echo "2. 或者手动运行相应的可执行文件" >> dist-windows\README.txt
         echo "" >> dist-windows\README.txt
         echo "自动安装 (推荐):" >> dist-windows\README.txt
         echo "  PowerShell -ExecutionPolicy Bypass -File install-windows.ps1" >> dist-windows\README.txt
         echo "" >> dist-windows\README.txt
-        echo "手动使用:" >> dist-windows\README.txt
+        echo "命令行工具使用:" >> dist-windows\README.txt
         echo "  docling-windows.exe --help" >> dist-windows\README.txt
         echo "  docling-windows.exe input.pdf" >> dist-windows\README.txt
+        echo "  docling-cli.bat --help" >> dist-windows\README.txt
         echo "" >> dist-windows\README.txt
-        echo "批处理包装器:" >> dist-windows\README.txt
-        echo "  docling.bat --help" >> dist-windows\README.txt
+        echo "可视化界面使用:" >> dist-windows\README.txt
+        echo "  docling-ui-windows.exe" >> dist-windows\README.txt
+        echo "  docling-ui.bat" >> dist-windows\README.txt
+        echo "  然后在浏览器中打开显示的地址（通常是 http://localhost:8501）" >> dist-windows\README.txt
     
     - name: Create ZIP archive
       run: |
@@ -182,6 +235,7 @@ jobs:
         path: |
           Docling-Windows.zip
           dist/docling-windows.exe
+          dist/docling-ui-windows.exe
 
   release:
     needs: [build-macos, build-windows]
@@ -205,9 +259,39 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          ./macos-artifacts/Docling-macOS.dmg
+          ./macos-artifacts/Docling-CLI-macOS.dmg
+          ./macos-artifacts/Docling-UI-macOS.dmg
           ./windows-artifacts/Docling-Windows.zip
         draft: false
         prerelease: false
+        body: |
+          ## Docling 应用程序包
+          
+          ### macOS
+          - **Docling-CLI-macOS.dmg**: 命令行工具
+          - **Docling-UI-macOS.dmg**: 可视化界面应用
+          
+          ### Windows
+          - **Docling-Windows.zip**: 包含CLI和UI两个应用的完整包
+            - `docling-windows.exe`: 命令行工具
+            - `docling-ui-windows.exe`: 可视化界面应用
+            - `docling-cli.bat` 和 `docling-ui.bat`: 便捷启动脚本
+            - `install-windows.ps1`: 自动安装脚本
+          
+          ### 使用说明
+          
+          **命令行工具**:
+          ```bash
+          # macOS
+          ./docling input.pdf
+          
+          # Windows
+          docling-windows.exe input.pdf
+          ```
+          
+          **可视化界面**:
+          - macOS: 双击 Docling-UI.app
+          - Windows: 运行 `docling-ui-windows.exe` 或 `docling-ui.bat`
+          - 在浏览器中打开 http://localhost:8501
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
