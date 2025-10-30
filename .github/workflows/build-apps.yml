@@ -121,7 +121,7 @@ jobs:
         fi
     
     - name: Upload macOS artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: docling-macos
         path: |
@@ -229,7 +229,7 @@ jobs:
         Compress-Archive -Path dist-windows\* -DestinationPath Docling-Windows.zip
     
     - name: Upload Windows artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: docling-windows
         path: |
@@ -244,13 +244,13 @@ jobs:
     
     steps:
     - name: Download macOS artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: docling-macos
         path: ./macos-artifacts
     
     - name: Download Windows artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: docling-windows
         path: ./windows-artifacts
