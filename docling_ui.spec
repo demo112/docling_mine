@@ -8,7 +8,11 @@ import sys
 from pathlib import Path
 
 # 获取项目根目录
-project_root = Path(__file__).parent
+try:
+    project_root = Path(__file__).parent
+except NameError:
+    # 当从命令行执行时，__file__ 可能不存在
+    project_root = Path(".")
 
 # 数据文件和隐藏导入
 datas = [
