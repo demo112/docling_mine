@@ -439,3 +439,9 @@ pip-selfcheck.json
 # Docs
 # docs/**/*.png
 # docs/**/*.svg
+
+# Build artifacts and large files
+*.app/
+*.dmg
+Docling.app/
+Docling-macOS.dmg

@@ -1,0 +1,213 @@
+name: Build Applications
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+        pip install -e .
+    
+    - name: Test docling CLI
+      run: |
+        docling --version
+    
+    - name: Build macOS app with PyInstaller
+      run: |
+        pyinstaller --onefile \
+          --name docling-macos \
+          --console \
+          --collect-all docling \
+          --collect-all docling_core \
+          --collect-all docling_parse \
+          --collect-all docling_ibm_models \
+          --add-data "docling:docling" \
+          docling/cli/main.py
+    
+    - name: Create macOS app bundle
+      run: |
+        mkdir -p "Docling.app/Contents/MacOS"
+        mkdir -p "Docling.app/Contents/Resources"
+        
+        # Copy the executable
+        cp dist/docling-macos "Docling.app/Contents/MacOS/docling"
+        
+        # Create Info.plist
+        cat > "Docling.app/Contents/Info.plist" << EOF
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>CFBundleExecutable</key>
+            <string>docling</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.docling.app</string>
+            <key>CFBundleName</key>
+            <string>Docling</string>
+            <key>CFBundleVersion</key>
+            <string>2.58.0</string>
+            <key>CFBundleShortVersionString</key>
+            <string>2.58.0</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>10.15</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+        </dict>
+        </plist>
+        EOF
+        
+        # Make executable
+        chmod +x "Docling.app/Contents/MacOS/docling"
+    
+    - name: Create DMG
+      run: |
+        # Install create-dmg if not available
+        if ! command -v create-dmg &> /dev/null; then
+          brew install create-dmg
+        fi
+        
+        # Create DMG
+        create-dmg \
+          --volname "Docling" \
+          --window-pos 200 120 \
+          --window-size 600 300 \
+          --icon-size 100 \
+          --icon "Docling.app" 175 120 \
+          --hide-extension "Docling.app" \
+          --app-drop-link 425 120 \
+          "Docling-macOS.dmg" \
+          "Docling.app"
+    
+    - name: Upload macOS artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: docling-macos
+        path: |
+          Docling-macOS.dmg
+          Docling.app
+
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+        pip install -e .
+    
+    - name: Test docling CLI
+      run: |
+        docling --version
+    
+    - name: Build Windows executable with PyInstaller
+      run: |
+        pyinstaller --onefile `
+          --name docling-windows `
+          --console `
+          --collect-all docling `
+          --collect-all docling_core `
+          --collect-all docling_parse `
+          --collect-all docling_ibm_models `
+          --add-data "docling;docling" `
+          docling/cli/main.py
+    
+    - name: Create Windows installer
+      run: |
+        # Create a simple batch file wrapper
+        echo '@echo off' > docling.bat
+        echo 'docling-windows.exe %*' >> docling.bat
+        
+        # Copy files to distribution folder
+        mkdir dist-windows
+        copy dist\docling-windows.exe dist-windows\
+        copy docling.bat dist-windows\
+        copy install-windows.ps1 dist-windows\
+        
+        # Create a comprehensive README
+        echo "Docling for Windows" > dist-windows\README.txt
+        echo "==================" >> dist-windows\README.txt
+        echo "" >> dist-windows\README.txt
+        echo "快速开始:" >> dist-windows\README.txt
+        echo "1. 运行 install-windows.ps1 进行自动安装" >> dist-windows\README.txt
+        echo "2. 或者手动运行 docling-windows.exe" >> dist-windows\README.txt
+        echo "" >> dist-windows\README.txt
+        echo "自动安装 (推荐):" >> dist-windows\README.txt
+        echo "  PowerShell -ExecutionPolicy Bypass -File install-windows.ps1" >> dist-windows\README.txt
+        echo "" >> dist-windows\README.txt
+        echo "手动使用:" >> dist-windows\README.txt
+        echo "  docling-windows.exe --help" >> dist-windows\README.txt
+        echo "  docling-windows.exe input.pdf" >> dist-windows\README.txt
+        echo "" >> dist-windows\README.txt
+        echo "批处理包装器:" >> dist-windows\README.txt
+        echo "  docling.bat --help" >> dist-windows\README.txt
+    
+    - name: Create ZIP archive
+      run: |
+        Compress-Archive -Path dist-windows\* -DestinationPath Docling-Windows.zip
+    
+    - name: Upload Windows artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: docling-windows
+        path: |
+          Docling-Windows.zip
+          dist/docling-windows.exe
+
+  release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Download macOS artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: docling-macos
+        path: ./macos-artifacts
+    
+    - name: Download Windows artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: docling-windows
+        path: ./windows-artifacts
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          ./macos-artifacts/Docling-macOS.dmg
+          ./windows-artifacts/Docling-Windows.zip
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
